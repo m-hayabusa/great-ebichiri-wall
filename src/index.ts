@@ -1,5 +1,6 @@
 import { hasBadWords } from "./libs/hasBadWords";
 import { useKVWithCache } from "./libs/KVWithCache";
+import { hasBadFiles } from "./libs/hasBadFiles";
 
 export interface Env {
   KV: KVNamespace;
@@ -8,6 +9,7 @@ export interface Env {
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const badWords = (await env.KV.get('badWords') ?? '').split(';').filter(w => w != '');
+    const badHashes = (await env.KV.get('badHashes') ?? '').split(';').filter(w => w != '');
     const cclimit = Number((await env.KV.get('cclimit') ?? '6'));
 
     // HEADやGETの場合はそのまま返す
@@ -34,7 +36,19 @@ export default {
           status: request.url.includes('inbox') ? 202 : 400,
         });
       }
-
+      if (await hasBadFiles(bodyJson, badHashes)) {
+        const message = (await env.KV.get('errorMessage') ?? 'その投稿には不適切なファイルが含まれています。')
+        return new Response(JSON.stringify({
+          error: {
+            message: message,
+            code: 'BAD_FILES',
+            id: 'beb27085-6ac2-4c0a-b64c-9801635cc9c0',
+          }
+        }), {
+          // Note: ActivityPubで400を返してしまうとリモートからのretryが相次いだり、最悪配送停止されてしまったりするので、inboxでは202を返す
+          status: request.url.includes('inbox') ? 202 : 400,
+        });
+      }
     } catch (e) {
       // do nothing
     }
